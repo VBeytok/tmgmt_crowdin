@@ -1,0 +1,10 @@
+{
+    "name": "vbeytok/tmgmt_crowdin",
+    "description ": "Crowdin TMGMT plugin",
+    "type": "drupal-module",
+    "license": "GPL-2.0+",
+    "require": {
+        "php": ">=7.2",
+        "drupal/tmgmt": "~1.4"
+    }
+}

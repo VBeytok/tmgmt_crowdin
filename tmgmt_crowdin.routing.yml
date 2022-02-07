@@ -1,0 +1,7 @@
+tmgmt_crowdin.file_webhook:
+  path: /tmgmt_crowdin/process/file_webhook
+  defaults:
+    _title: 'Process File Webhook for TMGMT Crowdin'
+    _controller: '\Drupal\tmgmt_crowdin\Controller\CrowdinWebhookController::process'
+  requirements:
+    _access: 'TRUE'

@@ -1,0 +1,12 @@
+tmgmt.translator.settings.crowdin:
+  type: tmgmt.translator_base
+  mapping:
+    personal_token:
+      type: string
+      label: Personal Access Token
+    project_id:
+      type: string
+      label: Project Id
+    domain:
+      type: string
+      label: Enterprise Domain
