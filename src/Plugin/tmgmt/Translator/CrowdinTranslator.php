@@ -75,7 +75,7 @@ class CrowdinTranslator extends TranslatorPluginBase implements ContainerFactory
         array $configuration,
         $plugin_id,
         $plugin_definition
-    ): CrowdinTranslator {
+    ): self {
         /** @var ClientInterface $client */
         $client = $container->get('http_client');
         /** @var FormatManager $formatManager */
@@ -97,7 +97,7 @@ class CrowdinTranslator extends TranslatorPluginBase implements ContainerFactory
         return $defaults;
     }
 
-    public function getSupportedRemoteLanguages(TranslatorInterface $translator)
+    public function getSupportedRemoteLanguages(TranslatorInterface $translator): array
     {
         try {
             $supported_languages = $this->request($translator, 'languages', ['limit' => 500]);

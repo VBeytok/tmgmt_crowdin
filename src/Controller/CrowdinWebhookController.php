@@ -28,7 +28,7 @@ class CrowdinWebhookController extends ControllerBase
         $this->logger = $logger;
     }
 
-    public static function create(ContainerInterface $container)
+    public static function create(ContainerInterface $container): self
     {
         return new static($container->get('logger.factory')->get('tmgmt_crowdin'));
     }
