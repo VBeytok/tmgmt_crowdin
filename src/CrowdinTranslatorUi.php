@@ -26,7 +26,7 @@ class CrowdinTranslatorUi extends TranslatorPluginUiBase
             '#title' => $this->t('Personal Access Token'),
             '#default_value' => $translator->getSetting(CrowdinTranslator::TOKEN_KEY) ? CrowdinTranslator::TOKEN_MASK : '',
             '#description' => $this->t(
-                'Please enter your Personal Access Token or check how to crate one <a href="@url">Crowdin Support</a> or <a href="@url_enterprise">Crowdin Enterprise Support</a>',
+                'Please enter your Personal Access Token or check how to create one <a href="@url">Crowdin Support</a> or <a href="@url_enterprise">Crowdin Enterprise Support</a>',
                 [
                     '@url' => 'https://support.crowdin.com/account-settings/#api',
                     '@url_enterprise' => 'https://support.crowdin.com/enterprise/personal-access-tokens/',
@@ -53,7 +53,7 @@ class CrowdinTranslatorUi extends TranslatorPluginUiBase
         return $form;
     }
 
-    public function validateConfigurationForm(array &$form, FormStateInterface $form_state)
+    public function validateConfigurationForm(array &$form, FormStateInterface $form_state): void
     {
         parent::validateConfigurationForm($form, $form_state);
 
@@ -80,15 +80,15 @@ class CrowdinTranslatorUi extends TranslatorPluginUiBase
         $form_state->setError($form['plugin_wrapper']['settings'][CrowdinTranslator::TOKEN_KEY], t('Personal Access Token is not valid.'));
     }
 
-    public function checkoutInfo(JobInterface $job)
+    public function checkoutInfo(JobInterface $job): array
     {
         $form = [];
 
         if ($job->isActive()) {
             $form['actions']['pull'] = [
                 '#type' => 'submit',
-                '#value' => $this->t('Pull translations'),
-                '#submit' => [[$this, 'submitPullTranslations']],
+                '#value' => $this->t('Fetch translations'),
+                '#submit' => [[$this, 'submitFetchTranslations']],
                 '#weight' => -10,
             ];
         }
@@ -96,13 +96,13 @@ class CrowdinTranslatorUi extends TranslatorPluginUiBase
         return $form;
     }
 
-    public function submitPullTranslations(array $form, FormStateInterface $form_state)
+    public function submitFetchTranslations(array $form, FormStateInterface $form_state): void
     {
         /** @var \Drupal\tmgmt\Entity\Job $job */
         $job = $form_state->getFormObject()->getEntity();
 
         /** @var CrowdinTranslator $crowdin_plugin */
         $crowdin_plugin = $job->getTranslator()->getPlugin();
-        $crowdin_plugin->pullTranslations($job);
+        $crowdin_plugin->fetchTranslations($job);
     }
 }

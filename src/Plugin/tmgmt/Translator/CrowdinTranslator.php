@@ -14,7 +14,7 @@ use Drupal\tmgmt\TMGMTException;
 use Drupal\tmgmt\Translator\AvailableResult;
 use Drupal\tmgmt\TranslatorInterface;
 use Drupal\tmgmt\TranslatorPluginBase;
-use Drupal\tmgmt_crowdin\Plugin\tmgmt_file\Format\Webxml;
+use Drupal\tmgmt_crowdin\Plugin\tmgmt_file\Format\WebXML;
 use Drupal\tmgmt_file\Format\FormatManager;
 use GuzzleHttp\Client;
 use GuzzleHttp\ClientInterface;
@@ -282,7 +282,7 @@ class CrowdinTranslator extends TranslatorPluginBase implements ContainerFactory
         }
     }
 
-    public function pullTranslations(JobInterface $job): void
+    public function fetchTranslations(JobInterface $job): void
     {
         try {
             $target_language = $job->getRemoteTargetLanguage();
@@ -478,7 +478,7 @@ class CrowdinTranslator extends TranslatorPluginBase implements ContainerFactory
         $file_id,
         $target_language
     ): void {
-        /** @var Webxml $webxml */
+        /** @var WebXML $webxml */
         $webxml = $this->formatManager->createInstance('webxml');
 
         $translation = $this->getFile($translator, $file_id, $target_language);
@@ -488,7 +488,7 @@ class CrowdinTranslator extends TranslatorPluginBase implements ContainerFactory
             throw new TMGMTException('Failed to validate remote translation, import aborted.');
         }
 
-        if ($validated_job->id() != $job_item->getJob()->id()) {
+        if ((int)$validated_job->id() !== (int)$job_item->getJob()->id()) {
             throw new TMGMTException(
                 'The remote translation (File ID: @file_id, Job ID: @target_job_id) does not match the current job ID @job_id.',
                 [
@@ -498,18 +498,18 @@ class CrowdinTranslator extends TranslatorPluginBase implements ContainerFactory
                 ],
                 'error'
             );
-        } else {
-            $data = $webxml->import($translation['data']['url']);
+        }
 
-            if ($data) {
-                $job_item->getJob()->addTranslatedData($data, NULL, TMGMT_DATA_ITEM_STATE_TRANSLATED);
-                $job_item->addMessage('The translation has been received.');
-            } else {
-                throw new TMGMTException(
-                    'Could not process received translation data for the target file @file_id.',
-                    ['@file_id' => $file_id]
-                );
-            }
+        $data = $webxml->import($translation['data']['url']);
+
+        if ($data) {
+            $job_item->getJob()->addTranslatedData($data, NULL, TMGMT_DATA_ITEM_STATE_TRANSLATED);
+            $job_item->addMessage('The translation has been received.');
+        } else {
+            throw new TMGMTException(
+                'Could not process received translation data for the target file @file_id.',
+                ['@file_id' => $file_id]
+            );
         }
     }
 

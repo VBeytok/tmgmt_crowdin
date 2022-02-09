@@ -17,7 +17,7 @@ use Drupal\tmgmt_file\Format\FormatInterface;
  *   label = @Translation("WEBXML")
  * )
  */
-class Webxml extends \XMLWriter implements FormatInterface
+class WebXML extends \XMLWriter implements FormatInterface
 {
     use MessengerTrait;
 
@@ -41,12 +41,12 @@ class Webxml extends \XMLWriter implements FormatInterface
 
         $data = \Drupal::service('tmgmt.data')->filterTranslatable($item->getData());
         foreach ($data as $key => $element) {
-            $this->addTransUnit($key, $element, $item);
+            $this->addTranslationUnit($key, $element, $item);
         }
         $this->endElement();
     }
 
-    protected function addTransUnit($key, $element, JobItemInterface $item): void
+    protected function addTranslationUnit($key, $element, JobItemInterface $item): void
     {
         /** @var Data $data_service */
         $data_service = \Drupal::service('tmgmt.data');
