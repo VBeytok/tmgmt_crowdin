@@ -71,7 +71,13 @@ class CrowdinWebhookController extends ControllerBase
         /** @var CrowdinTranslator $crowdin_translator */
         $crowdin_translator = $translator->getPlugin();
 
-        $project = $crowdin_translator->getProject($translator);
+        $webhook_id_by_project_id = unserialize($crowdin_translator->getCrowdinData('webhook_id_by_project_id'));
+
+        if (!array_key_exists($data['project_id'], $webhook_id_by_project_id)) {
+            return new JsonResponse($response, Response::HTTP_OK);
+        }
+
+        $project = $crowdin_translator->getProject($translator, $data['project_id']);
 
         if ($project['data']['exportApprovedOnly'] && $data['event'] !== CrowdinTranslator::FILE_APPROVED_EVENT) {
             return new JsonResponse($response, Response::HTTP_OK);

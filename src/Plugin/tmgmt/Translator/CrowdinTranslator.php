@@ -114,10 +114,14 @@ class CrowdinTranslator extends TranslatorPluginBase implements ContainerFactory
 
     public function requestTranslation(JobInterface $job): void
     {
-        $this->requestJobItemsTranslation($job->getItems());
-        if (!$job->isRejected()) {
-            $job->submitted('Job has been successfully submitted for translation.');
+        try {
+            $this->requestJobItemsTranslation($job->getItems());
+        } catch (TMGMTException $e) {
+            $job->rejected('Job has been rejected with following error: @error', ['@error' => $e->getMessage()]);
+            return;
         }
+
+        $job->submitted('Job has been successfully submitted for translation.');
     }
 
     public function checkAvailable(TranslatorInterface $translator): AvailableResult
@@ -139,79 +143,81 @@ class CrowdinTranslator extends TranslatorPluginBase implements ContainerFactory
 
     /**
      * @param JobItemInterface[] $job_items
-     * @throws \Drupal\Component\Plugin\Exception\PluginException
+     * @throws \Drupal\Component\Plugin\Exception\PluginException|TMGMTException
      */
     public function requestJobItemsTranslation(array $job_items): void
     {
         $first_item = reset($job_items);
         $job = $first_item->getJob();
 
-        try {
-            $this->formatManager->clearCachedDefinitions();
-            $xliff = $this->formatManager->createInstance('webxml');
+        $this->formatManager->clearCachedDefinitions();
+        $xliff = $this->formatManager->createInstance('webxml');
 
-            $translator = $job->getTranslator();
+        $translator = $job->getTranslator();
 
-            $project = $this->getProject($translator);
-            $excluded_target_languages = array_diff(
-                $project['data']['targetLanguageIds'],
-                [$job->getRemoteTargetLanguage()]
+        $project = $this->getProject($translator);
+
+        if (!in_array($job->getRemoteTargetLanguage(), $project['data']['targetLanguageIds'], true)) {
+            throw new TMGMTException("Crowdin target language '{$job->getRemoteTargetLanguage()}' not exist");
+        }
+
+        $excluded_target_languages = array_diff(
+            $project['data']['targetLanguageIds'],
+            [$job->getRemoteTargetLanguage()]
+        );
+
+        $root_directory = $this->createRootDirectory($translator);
+        $name = ($job->label() ?: 'Job') . ' (' . $job->id() . ')';
+        $job_directory = $this->createJobDirectory($translator, $root_directory['data']['id'], $name);
+
+        foreach ($job_items as $job_item) {
+            $job_item_id = $job_item->id();
+            $file_title = $job_item->label();
+
+            $xliff_content = $xliff->export($job, ['tjiid' => ['value' => $job_item_id]]);
+
+            $file_name = sprintf(
+                self::FORMAT_FILE_NAME,
+                $job->id(),
+                $job_item_id,
+                $job->getSourceLangcode(),
+                $job->getTargetLangcode()
             );
 
-            $root_directory = $this->createRootDirectory($translator);
-            $name = ($job->label() ?: 'Job') . ' (' . $job->id() . ')';
-            $job_directory = $this->createJobDirectory($translator, $root_directory['data']['id'], $name);
+            $file = $this->addFile(
+                $translator,
+                $job_directory['data']['id'],
+                $file_name,
+                $file_title,
+                $xliff_content,
+                $excluded_target_languages
+            );
+            $job_item->active();
 
-            foreach ($job_items as $job_item) {
-                $job_item_id = $job_item->id();
-                $file_title = $job_item->label();
-
-                $xliff_content = $xliff->export($job, ['tjiid' => ['value' => $job_item_id]]);
-
-                $file_name = sprintf(
-                    self::FORMAT_FILE_NAME,
-                    $job->id(),
-                    $job_item_id,
-                    $job->getSourceLangcode(),
-                    $job->getTargetLangcode()
-                );
-
-                $file = $this->addFile(
-                    $translator,
-                    $job_directory['data']['id'],
-                    $file_name,
-                    $file_title,
-                    $xliff_content,
-                    $excluded_target_languages
-                );
-                $job_item->active();
-
-                $job_item->addRemoteMapping(
-                    null,
-                    $file['data']['id'],
-                    ['remote_identifier_2' => $job_directory['data']['id']]
-                );
-            }
-
-            $this->requestFileWebhook($translator);
-        } catch (TMGMTException $e) {
-            $job->rejected(
-                'Job has been rejected with following error: @error',
-                ['@error' => $e->getMessage()],
-                'error'
+            $job_item->addRemoteMapping(
+                null,
+                $file['data']['id'],
+                [
+                    'remote_identifier_2' => $job_directory['data']['id'],
+                    'remote_identifier_3' => $this->getProjectId()
+                ]
             );
         }
+
+        $this->requestFileWebhook($translator);
     }
 
     public function abortTranslation(JobInterface $job): bool
     {
         $folder_id = null;
+        $project_id = null;
         $translator = $job->getTranslator();
 
         /** @var \Drupal\tmgmt\Entity\RemoteMapping $remote */
         foreach ($job->getRemoteMappings() as $remote) {
             $job_item = $remote->getJobItem();
             $folder_id = $remote->getRemoteIdentifier2();
+            $project_id = $remote->getRemoteIdentifier3();
 
             try {
                 $job_item->setState(
@@ -239,7 +245,7 @@ class CrowdinTranslator extends TranslatorPluginBase implements ContainerFactory
         }
 
         if ($folder_id) {
-            $this->removeJobDirectory($translator, $folder_id);
+            $this->removeJobDirectory($translator, $folder_id, $project_id);
         }
 
         try {
@@ -268,9 +274,10 @@ class CrowdinTranslator extends TranslatorPluginBase implements ContainerFactory
         return \Drupal::configFactory()->get('crowdin.settings')->get($key);
     }
 
-    public function getProject(TranslatorInterface $translator): array
+    public function getProject(TranslatorInterface $translator, ?int $project_id = null): array
     {
-        return $this->request($translator, "projects/{$this->getProjectId()}");
+        $project_id = $project_id ?: $this->getProjectId();
+        return $this->request($translator, "projects/{$project_id}");
     }
 
     public function getUser(TranslatorInterface $translator): array
@@ -338,7 +345,7 @@ class CrowdinTranslator extends TranslatorPluginBase implements ContainerFactory
     ): bool {
         $translator = $job_item->getTranslator();
 
-        $file_progress = $this->getFileProgress($translator, $file_id);
+        $file_progress = $this->getFileProgress($translator, $project['data']['id'], $file_id);
         $target_language_progress = null;
 
         foreach ($file_progress['data'] as $language_progress) {
@@ -356,7 +363,7 @@ class CrowdinTranslator extends TranslatorPluginBase implements ContainerFactory
             ($project['data']['exportApprovedOnly'] && $target_language_progress['approvalProgress'] === 100)
             || (!$project['data']['exportApprovedOnly'] && $target_language_progress['translationProgress'] === 100)
         ) {
-            $this->importTranslation($translator, $job_item, $file_id, $target_language);
+            $this->importTranslation($translator, $job_item, $project['data']['id'], $file_id, $target_language);
             return true;
         }
 
@@ -379,21 +386,25 @@ class CrowdinTranslator extends TranslatorPluginBase implements ContainerFactory
         return $this->getCrowdinData('project_id');
     }
 
-    private function getFile(TranslatorInterface $translator, $file_id, $target_language): array
-    {
+    private function getFile(
+        TranslatorInterface $translator,
+        int $project_id,
+        int $file_id,
+        string $target_language
+    ): array {
         return $this->request(
             $translator,
-            "projects/{$this->getProjectId()}/translations/builds/files/{$file_id}",
+            "projects/{$project_id}/translations/builds/files/{$file_id}",
             ['json' => ['targetLanguageId' => $target_language]],
             'POST'
         );
     }
 
-    private function getFileProgress(TranslatorInterface $translator, $file_id): array
+    private function getFileProgress(TranslatorInterface $translator, int $project_id, int $file_id): array
     {
         return $this->request(
             $translator,
-            "projects/{$this->getProjectId()}/files/{$file_id}/languages/progress",
+            "projects/{$project_id}/files/{$file_id}/languages/progress",
             ['limit' => 500]
         );
     }
@@ -451,20 +462,41 @@ class CrowdinTranslator extends TranslatorPluginBase implements ContainerFactory
     {
         $crowdin_translator = $translator->getPlugin();
 
-        if (!$crowdin_translator->getCrowdinData('webhook_id')) {
-            $params = [
-                'json' => [
-                    'name' => 'Files Webhooks for Drupal Connector',
-                    'url' => Url::fromRoute('tmgmt_crowdin.file_webhook')->setAbsolute()->toString(),
-                    'events' => [self::FILE_TRANSLATED_EVENT, self::FILE_APPROVED_EVENT],
-                    'requestType' => 'POST'
-                ]
-            ];
+        //back compatibility
+        if ($crowdin_translator->getCrowdinData('webhook_id')) {
+            $this->request(
+                $translator,
+                "projects/{$this->getProjectId()}/webhooks/{$crowdin_translator->getCrowdinData('webhook_id')}",
+                [],
+                'DELETE'
+            );
 
-            $webhook = $this->request($translator, "projects/{$this->getProjectId()}/webhooks", $params, 'POST');
-
-            $crowdin_translator->setCrowdinData('webhook_id', $webhook['data']['id']);
+            $crowdin_translator->setCrowdinData('webhook_id', null);
         }
+
+        $webhook_id_by_project_id = [];
+
+        if ($crowdin_translator->getCrowdinData('webhook_id_by_project_id')) {
+            $webhook_id_by_project_id = unserialize($crowdin_translator->getCrowdinData('webhook_id_by_project_id'));
+
+            if (isset($webhook_id_by_project_id[$this->getProjectId()])) {
+                return;
+            }
+        }
+
+        $params = [
+            'json' => [
+                'name' => 'Files Webhooks for Drupal Connector',
+                'url' => Url::fromRoute('tmgmt_crowdin.file_webhook')->setAbsolute()->toString(),
+                'events' => [self::FILE_TRANSLATED_EVENT, self::FILE_APPROVED_EVENT],
+                'requestType' => 'POST'
+            ]
+        ];
+
+        $webhook = $this->request($translator, "projects/{$this->getProjectId()}/webhooks", $params, 'POST');
+        $webhook_id_by_project_id[$this->getProjectId()] = $webhook['data']['id'];
+
+        $crowdin_translator->setCrowdinData('webhook_id_by_project_id', serialize($webhook_id_by_project_id));
     }
 
     private function cancelFileWebhook(TranslatorInterface $translator): void
@@ -475,13 +507,14 @@ class CrowdinTranslator extends TranslatorPluginBase implements ContainerFactory
     private function importTranslation(
         TranslatorInterface $translator,
         JobItemInterface $job_item,
-        $file_id,
-        $target_language
+        int $project_id,
+        int $file_id,
+        string $target_language
     ): void {
         /** @var WebXML $webxml */
         $webxml = $this->formatManager->createInstance('webxml');
 
-        $translation = $this->getFile($translator, $file_id, $target_language);
+        $translation = $this->getFile($translator, $project_id, $file_id, $target_language);
         $validated_job = $webxml->validateImport($translation['data']['url']);
 
         if (!$validated_job) {
@@ -568,9 +601,16 @@ class CrowdinTranslator extends TranslatorPluginBase implements ContainerFactory
         return $directory;
     }
 
-    private function removeJobDirectory(TranslatorInterface $translator, int $job_directory_id): void
+    private function removeJobDirectory(TranslatorInterface $translator, int $job_directory_id, ?int $project_id): void
     {
-        $this->request($translator, "projects/{$this->getProjectId()}/directories/{$job_directory_id}", [], 'DELETE');
+        $project_id = $project_id ?: $this->getProjectId();
+        try {
+            $this->request($translator, "projects/{$project_id}/directories/{$job_directory_id}", [], 'DELETE');
+        } catch (TMGMTException $e) {
+            if ($e->getCode() !== Response::HTTP_NOT_FOUND) {
+                throw $e;
+            }
+        }
     }
 
     private function addFile(
